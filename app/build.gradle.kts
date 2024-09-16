@@ -15,6 +15,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Fetch the API key from environment variables
+        val apiKey: String? = System.getenv("MAPS_API_KEY")
+        // Set manifest placeholders
+        manifestPlaceholders["MAPS_API_KEY"] = apiKey ?: ""
     }
 
     buildTypes {
@@ -45,4 +50,8 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    // Google Maps SDK
+    implementation (libs.play.services.maps)
+    // Location services for getting user location
+    implementation(libs.play.services.location)
 }
