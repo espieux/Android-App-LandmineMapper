@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("org.jetbrains.kotlin.kapt")
 }
 
 android {
@@ -50,8 +51,27 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
     // Google Maps SDK
-    implementation (libs.play.services.maps)
+    implementation(libs.play.services.maps)
+
     // Location services for getting user location
     implementation(libs.play.services.location)
+
+    // Room components (for local database)
+    implementation("androidx.room:room-runtime:2.5.2")
+    kapt("androidx.room:room-compiler:2.5.2") // Kapt for Room annotation processing
+    implementation("androidx.room:room-ktx:2.5.2") // Room with Kotlin Extensions
+
+    // Lifecycle components (ViewModel, LiveData)
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.1")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.6.1")
+
+    // Coroutines (for background tasks)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // Photo Picker for Android 14+
+    implementation("androidx.activity:activity-compose:1.6.0-alpha03") // Activity result for the Photo Picker
+
+    implementation (libs.picasso)
 }
