@@ -1,20 +1,128 @@
 package com.devinci.landminemapper
 
+import android.content.ContentValues
+import android.graphics.Bitmap
 import android.os.Bundle
-import androidx.activity.enableEdgeToEdge
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.GoogleMap
+import com.google.android.gms.maps.MapView
+import com.google.android.gms.maps.OnMapReadyCallback
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.Marker
+import com.google.android.gms.maps.model.MarkerOptions
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import java.io.OutputStream
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), OnMapReadyCallback {
+
+    private lateinit var mapView: MapView
+    private lateinit var googleMap: GoogleMap
+    private lateinit var fab: FloatingActionButton
+    private val landmineMap = HashMap<Marker, Landmine>()
+
+    private var currentLocation: LatLng = LatLng(0.0, 0.0) // Default to (0.0, 0.0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContentView(R.layout.activity_main)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
+
+        mapView = findViewById(R.id.mapView)
+        fab = findViewById(R.id.fab)
+
+        mapView.onCreate(savedInstanceState)
+        mapView.getMapAsync(this)
+
+        fab.setOnClickListener {
+            openCamera()
         }
+    }
+
+    override fun onMapReady(map: GoogleMap) {
+        googleMap = map
+
+        // Set up InfoWindowAdapter
+        googleMap.setInfoWindowAdapter(LandmineInfoWindowAdapter(this, landmineMap))
+
+        // Listen for map camera movements to track the current location
+        googleMap.setOnCameraIdleListener {
+            currentLocation = googleMap.cameraPosition.target
+        }
+    }
+
+    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            saveImageToGallery(bitmap)
+        } else {
+            Toast.makeText(this, "Failed to capture photo", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openCamera() {
+        takePicture.launch(null)
+    }
+
+    private fun saveImageToGallery(bitmap: Bitmap) {
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "Landmine_${System.currentTimeMillis()}.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+        }
+
+        val resolver = contentResolver
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
+        if (uri != null) {
+            val outputStream: OutputStream? = resolver.openOutputStream(uri)
+            outputStream?.use {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, it)
+            }
+
+            // Create landmine object
+            val landmine = Landmine(
+                name = "Landmine ${System.currentTimeMillis()}",
+                discoverer = "John Doe", // Placeholder for discoverer name
+                latitude = currentLocation.latitude,
+                longitude = currentLocation.longitude,
+                defused = false,
+                imageUri = uri.toString()
+            )
+
+            // Add marker and associate it with landmine
+            val marker = googleMap.addMarker(
+                MarkerOptions()
+                    .position(currentLocation)
+                    .title(landmine.name)
+            )
+            if (marker != null) {
+                landmineMap[marker] = landmine
+            }
+
+            Toast.makeText(this, "Photo saved to gallery and marker added!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Failed to save photo", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mapView.onResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        mapView.onPause()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        mapView.onDestroy()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        mapView.onLowMemory()
     }
 }
