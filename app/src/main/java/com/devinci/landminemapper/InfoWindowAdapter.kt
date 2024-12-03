@@ -7,7 +7,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.Marker
-import com.squareup.picasso.Picasso // Add Picasso to load images easily
+import com.squareup.picasso.Picasso
 
 class LandmineInfoWindowAdapter(
     private val activity: AppCompatActivity,
@@ -29,12 +29,16 @@ class LandmineInfoWindowAdapter(
         landmineDiscoverer.text = "Discoverer: ${landmine.discoverer}"
         landmineCoordinates.text = "Coordinates: ${landmine.latitude}, ${landmine.longitude}"
         landmineDefused.text = if (landmine.defused) "Defused: Yes" else "Defused: No"
-        Picasso.get().load(landmine.imageUri).into(landmineImage)
+
+        // Safely load image
+        try {
+            Picasso.get().load(landmine.imageUri).into(landmineImage)
+        } catch (e: Exception) {
+            // Optionally set a placeholder or error image
+        }
 
         return infoWindow
     }
 
-    override fun getInfoContents(marker: Marker): View? {
-        return null
-    }
+    override fun getInfoContents(marker: Marker): View? = null
 }

@@ -1,12 +1,22 @@
 package com.devinci.landminemapper
 
+import android.Manifest
+import android.app.AlertDialog
 import android.content.ContentValues
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
+import android.view.LayoutInflater
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView
@@ -22,9 +32,34 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var mapView: MapView
     private lateinit var googleMap: GoogleMap
     private lateinit var fab: FloatingActionButton
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val landmineMap = HashMap<Marker, Landmine>()
 
-    private var currentLocation: LatLng = LatLng(0.0, 0.0) // Default to (0.0, 0.0)
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            fetchCurrentLocation()
+        } else {
+            showToast("Location permission denied")
+        }
+    }
+
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            openCamera()
+        } else {
+            showToast("Camera permission denied")
+        }
+    }
+
+    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        bitmap?.let { capturedBitmap ->
+            requestCurrentLocationAndSaveImage(capturedBitmap)
+        } ?: showToast("Failed to capture photo")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,32 +67,37 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
         mapView = findViewById(R.id.mapView)
         fab = findViewById(R.id.fab)
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
         mapView.onCreate(savedInstanceState)
         mapView.getMapAsync(this)
 
         fab.setOnClickListener {
-            openCamera()
+            checkPermissionsAndOpenCamera()
         }
     }
 
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
-
-        // Set up InfoWindowAdapter
         googleMap.setInfoWindowAdapter(LandmineInfoWindowAdapter(this, landmineMap))
-
-        // Listen for map camera movements to track the current location
-        googleMap.setOnCameraIdleListener {
-            currentLocation = googleMap.cameraPosition.target
-        }
+        fetchCurrentLocation()
     }
 
-    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
-        if (bitmap != null) {
-            saveImageToGallery(bitmap)
-        } else {
-            Toast.makeText(this, "Failed to capture photo", Toast.LENGTH_SHORT).show()
+    private fun checkPermissionsAndOpenCamera() {
+        when {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED -> {
+                when {
+                    ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED -> openCamera()
+                    else -> locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                }
+            }
+            else -> cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
@@ -65,7 +105,41 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         takePicture.launch(null)
     }
 
-    private fun saveImageToGallery(bitmap: Bitmap) {
+    private fun requestCurrentLocationAndSaveImage(bitmap: Bitmap) {
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            return
+        }
+
+        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+            location?.let {
+                showDiscovererInputDialog(bitmap, LatLng(it.latitude, it.longitude))
+            } ?: showToast("Unable to get location")
+        }.addOnFailureListener {
+            showToast("Location retrieval failed")
+        }
+    }
+
+    private fun showDiscovererInputDialog(bitmap: Bitmap, location: LatLng) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_discoverer_input, null)
+        val discovererEditText = dialogView.findViewById<EditText>(R.id.discoverer_edit_text)
+
+        AlertDialog.Builder(this)
+            .setTitle("Enter Your Name")
+            .setView(dialogView)
+            .setPositiveButton("Save") { _, _ ->
+                val discovererName = discovererEditText.text.toString().ifEmpty { "Anonymous" }
+                saveImageToGallery(bitmap, location, discovererName)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun saveImageToGallery(bitmap: Bitmap, location: LatLng, discoverer: String) {
         val contentValues = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, "Landmine_${System.currentTimeMillis()}.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -74,38 +148,58 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val resolver = contentResolver
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
 
-        if (uri != null) {
-            val outputStream: OutputStream? = resolver.openOutputStream(uri)
+        uri?.let { imageUri ->
+            val outputStream: OutputStream? = resolver.openOutputStream(imageUri)
             outputStream?.use {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 100, it)
             }
 
-            // Create landmine object
             val landmine = Landmine(
                 name = "Landmine ${System.currentTimeMillis()}",
-                discoverer = "John Doe", // Placeholder for discoverer name
-                latitude = currentLocation.latitude,
-                longitude = currentLocation.longitude,
+                discoverer = discoverer,
+                latitude = location.latitude,
+                longitude = location.longitude,
                 defused = false,
-                imageUri = uri.toString()
+                imageUri = imageUri.toString()
             )
 
-            // Add marker and associate it with landmine
             val marker = googleMap.addMarker(
                 MarkerOptions()
-                    .position(currentLocation)
+                    .position(location)
                     .title(landmine.name)
             )
-            if (marker != null) {
-                landmineMap[marker] = landmine
-            }
 
-            Toast.makeText(this, "Photo saved to gallery and marker added!", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "Failed to save photo", Toast.LENGTH_SHORT).show()
+            marker?.let {
+                landmineMap[it] = landmine
+                showToast("Landmine location saved!")
+            }
+        } ?: showToast("Failed to save image")
+    }
+
+    private fun fetchCurrentLocation() {
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            return
+        }
+
+        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+            location?.let {
+                val currentLocation = LatLng(it.latitude, it.longitude)
+                googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLocation, 15f))
+            }
         }
     }
 
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        Log.d("LandmineMapper", message)
+    }
+
+    // Lifecycle methods
     override fun onResume() {
         super.onResume()
         mapView.onResume()
